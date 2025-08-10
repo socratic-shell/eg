@@ -2,5 +2,39 @@
 name = "eg"
 version = "0.1.0"
 edition = "2024"
+description = "Programmatic access to library examples and documentation"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/socratic-shell/eg"
 
 [dependencies]
+# Version resolution and project detection
+cargo_metadata = "0.21.0"
+semver = "1.0"
+
+# Cache and file system
+home = "0.5"
+
+# Archive processing
+flate2 = "1.0"
+tar = "0.4"
+
+# HTTP and API clients
+reqwest = { version = "0.12", features = ["json"] }
+crates_io_api = "0.11.0"
+octocrab = "0.44"
+
+# Regex for pattern matching
+regex = "1.0"
+
+# Base64 decoding for GitHub content
+base64 = "0.22"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"

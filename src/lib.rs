@@ -12,8 +12,9 @@
 //!     // Find examples in current project's tokio dependency
 //!     let result = Eg::rust_crate("tokio").search().await?;
 //!     
-//!     println!("Found {} examples, {} matched", 
-//!              result.total_examples, result.matched_examples);
+//!     println!("Crate extracted to: {}", result.checkout_path.display());
+//!     println!("Found {} example matches, {} other matches", 
+//!              result.example_matches.len(), result.other_matches.len());
 //!     
 //!     Ok(())
 //! }
@@ -41,48 +42,25 @@ impl Eg {
 pub struct SearchResult {
     /// The exact version that was searched
     pub version: String,
-    /// Total number of example files found
-    pub total_examples: usize,
-    /// Number of examples that matched the search pattern
-    pub matched_examples: usize,
-    /// The actual example files and their matches
-    pub examples: Vec<Example>,
+    /// Path to the full crate extraction on disk
+    pub checkout_path: PathBuf,
+    /// Matches found in examples/ directory
+    pub example_matches: Vec<Match>,
+    /// Matches found elsewhere in the crate
+    pub other_matches: Vec<Match>,
 }
 
-/// An example file with optional search matches
+/// A search match with context
 #[derive(Debug, Clone)]
-pub enum Example {
-    /// Example found on local disk
-    ExampleOnDisk {
-        /// Local file path
-        path: PathBuf,
-        /// Locations where search pattern matched
-        search_matches: Vec<SearchRange>,
-    },
-    /// Example downloaded and held in memory
-    ExampleInMemory {
-        /// Original path in examples/ directory
-        filename: String,
-        /// File contents
-        contents: String,
-        /// Locations where search pattern matched
-        search_matches: Vec<SearchRange>,
-    },
-}
-
-/// Precise location of a search match within a file
-#[derive(Debug, Clone)]
-pub struct SearchRange {
-    /// 0-based byte that is the start of the match
-    pub byte_start: u32,
-    /// 1-based line where the search started
-    pub line_start: u32,
-    /// 1-based column marking the start of the match
-    pub column_start: u32,
-    /// 0-based byte that is the end of the match (exclusive)
-    pub byte_end: u32,
-    /// 1-based line where the search ended
-    pub line_end: u32,
-    /// 1-based column marking the end of the match (exclusive)
-    pub column_end: u32,
+pub struct Match {
+    /// Relative path within the crate
+    pub file_path: PathBuf,
+    /// 1-based line number where match was found
+    pub line_number: u32,
+    /// The line containing the match
+    pub line_content: String,
+    /// Lines before the match for context
+    pub context_before: Vec<String>,
+    /// Lines after the match for context
+    pub context_after: Vec<String>,
 }

@@ -13,6 +13,7 @@ semver = "1.0"
 
 # Cache and file system
 home = "0.5"
+dirs = "5.0"
 
 # Archive processing
 flate2 = "1.0"

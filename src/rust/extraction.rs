@@ -1,13 +1,13 @@
-//! Crate extraction and example searching
+//! Crate extraction to local cache
 
-use crate::{Result, EgError, Example, SearchRange};
+use crate::{Result, EgError};
 use flate2::read::GzDecoder;
-use regex::Regex;
+use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tar::Archive;
 
-/// Handles extraction of examples from .crate files
+/// Handles extraction of .crate files to local cache
 pub struct CrateExtractor;
 
 impl CrateExtractor {
@@ -15,23 +15,24 @@ impl CrateExtractor {
         Self
     }
 
-    /// Extract examples from a cached .crate file
-    pub async fn extract_examples_from_file(
+    /// Extract a cached .crate file to the extraction cache
+    pub async fn extract_crate_to_cache(
         &self,
         crate_path: &Path,
-        pattern: Option<&Regex>,
-    ) -> Result<Vec<Example>> {
-        let file = std::fs::File::open(crate_path)?;
-        self.extract_examples_from_reader(file, pattern).await
+        extraction_path: &PathBuf,
+    ) -> Result<PathBuf> {
+        let file = fs::File::open(crate_path)?;
+        self.extract_from_reader(file, extraction_path).await?;
+        Ok(extraction_path.clone())
     }
 
-    /// Download and extract examples from crates.io
-    pub async fn extract_examples_from_download(
+    /// Download and extract a crate to the extraction cache
+    pub async fn download_and_extract_crate(
         &self,
         crate_name: &str,
         version: &str,
-        pattern: Option<&Regex>,
-    ) -> Result<Vec<Example>> {
+        extraction_path: &PathBuf,
+    ) -> Result<PathBuf> {
         let download_url = format!(
             "https://static.crates.io/crates/{}/{}-{}.crate",
             crate_name, crate_name, version
@@ -46,106 +47,82 @@ impl CrateExtractor {
         }
 
         let bytes = response.bytes().await?;
-        self.extract_examples_from_reader(std::io::Cursor::new(bytes), pattern).await
+        self.extract_from_reader(std::io::Cursor::new(bytes), extraction_path).await?;
+        Ok(extraction_path.clone())
     }
 
-    /// Extract examples from any reader (file or downloaded bytes)
-    async fn extract_examples_from_reader<R: Read>(
+    /// Extract from any reader to the specified directory
+    async fn extract_from_reader<R: Read>(
         &self,
         reader: R,
-        pattern: Option<&Regex>,
-    ) -> Result<Vec<Example>> {
+        extraction_path: &PathBuf,
+    ) -> Result<()> {
+        // Create extraction directory
+        fs::create_dir_all(extraction_path)?;
+
         let gz_decoder = GzDecoder::new(reader);
         let mut archive = Archive::new(gz_decoder);
-        let mut examples = Vec::new();
 
-        for entry_result in archive.entries()
-            .map_err(|e| EgError::ExtractionError(format!("Failed to read archive entries: {}", e)))? 
-        {
-            let mut entry = entry_result
-                .map_err(|e| EgError::ExtractionError(format!("Failed to read archive entry: {}", e)))?;
-            
-            let path = entry.path()
-                .map_err(|e| EgError::ExtractionError(format!("Failed to get entry path: {}", e)))?;
+        // Extract all files
+        archive.unpack(extraction_path)
+            .map_err(|e| EgError::ExtractionError(format!("Failed to extract archive: {}", e)))?;
 
-            // Check if this is an example file
-            if self.is_example_file(&path) {
-                // Extract filename before reading content to avoid borrow issues
-                let filename = path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
+        // The archive typically contains a single directory with the crate name-version
+        // We want to flatten this structure
+        self.flatten_extraction(extraction_path)?;
 
-                let mut content = String::new();
-                entry.read_to_string(&mut content)
-                    .map_err(|e| EgError::ExtractionError(format!("Failed to read file content: {}", e)))?;
+        Ok(())
+    }
 
-                let search_matches = if let Some(regex) = pattern {
-                    self.find_matches(&content, regex)
-                } else {
-                    Vec::new()
-                };
+    /// Flatten the extraction if it contains a single top-level directory
+    fn flatten_extraction(&self, extraction_path: &PathBuf) -> Result<()> {
+        let entries: Vec<_> = fs::read_dir(extraction_path)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
 
-                examples.push(Example::ExampleInMemory {
-                    filename,
-                    contents: content,
-                    search_matches,
-                });
+        // If there's exactly one entry and it's a directory, move its contents up
+        if entries.len() == 1 {
+            let entry = &entries[0];
+            if entry.file_type()?.is_dir() {
+                let inner_dir = entry.path();
+                
+                // Move all contents from inner directory to extraction_path
+                for inner_entry in fs::read_dir(&inner_dir)? {
+                    let inner_entry = inner_entry?;
+                    let src = inner_entry.path();
+                    let dst = extraction_path.join(inner_entry.file_name());
+                    
+                    if src.is_dir() {
+                        self.move_dir(&src, &dst)?;
+                    } else {
+                        fs::rename(&src, &dst)?;
+                    }
+                }
+                
+                // Remove the now-empty inner directory
+                fs::remove_dir(&inner_dir)?;
             }
         }
 
-        Ok(examples)
+        Ok(())
     }
 
-    /// Check if a path represents an example file
-    fn is_example_file(&self, path: &Path) -> bool {
-        // Look for files in examples/ directory
-        path.components().any(|c| c.as_os_str() == "examples") &&
-        path.extension().map_or(false, |ext| ext == "rs")
-    }
-
-    /// Find regex matches in content and convert to SearchRange
-    fn find_matches(&self, content: &str, regex: &Regex) -> Vec<SearchRange> {
-        let mut matches = Vec::new();
+    /// Recursively move a directory
+    fn move_dir(&self, src: &Path, dst: &Path) -> Result<()> {
+        fs::create_dir_all(dst)?;
         
-        for mat in regex.find_iter(content) {
-            let start_pos = mat.start();
-            let end_pos = mat.end();
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
             
-            // Calculate line and column positions
-            let (start_line, start_col) = self.byte_to_line_col(content, start_pos);
-            let (end_line, end_col) = self.byte_to_line_col(content, end_pos);
-            
-            matches.push(SearchRange {
-                byte_start: start_pos as u32,
-                line_start: start_line,
-                column_start: start_col,
-                byte_end: end_pos as u32,
-                line_end: end_line,
-                column_end: end_col,
-            });
-        }
-        
-        matches
-    }
-
-    /// Convert byte position to 1-based line and column
-    fn byte_to_line_col(&self, content: &str, byte_pos: usize) -> (u32, u32) {
-        let mut line = 1;
-        let mut col = 1;
-        
-        for (i, ch) in content.char_indices() {
-            if i >= byte_pos {
-                break;
-            }
-            if ch == '\n' {
-                line += 1;
-                col = 1;
+            if src_path.is_dir() {
+                self.move_dir(&src_path, &dst_path)?;
             } else {
-                col += 1;
+                fs::rename(&src_path, &dst_path)?;
             }
         }
         
-        (line, col)
+        fs::remove_dir(src)?;
+        Ok(())
     }
 }

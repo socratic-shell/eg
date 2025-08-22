@@ -1,16 +1,18 @@
 //! Rust-specific example searching functionality
 
-use crate::{Result, SearchResult, Example, SearchRange};
+use crate::{Result, SearchResult};
 use regex::Regex;
 
 mod version;
 mod cache;
 mod extraction;
+mod search;
 mod github;
 
 pub use version::VersionResolver;
 pub use cache::CacheManager;
 pub use extraction::CrateExtractor;
+pub use search::CrateSearcher;
 pub use github::GitHubFallback;
 
 /// Builder for searching Rust crate examples
@@ -18,6 +20,7 @@ pub struct RustCrateSearch {
     crate_name: String,
     version_spec: Option<String>,
     pattern: Option<Regex>,
+    context_lines: usize,
 }
 
 impl RustCrateSearch {
@@ -27,6 +30,7 @@ impl RustCrateSearch {
             crate_name: name.to_string(),
             version_spec: None,
             pattern: None,
+            context_lines: 2, // Default context
         }
     }
 
@@ -36,12 +40,18 @@ impl RustCrateSearch {
         self
     }
 
-    /// Specify a regex pattern to search for within examples
+    /// Specify a regex pattern to search for within the crate
     pub fn pattern(mut self, pattern: &str) -> Result<Self> {
         let regex = Regex::new(pattern)
             .map_err(|e| crate::EgError::Other(format!("Invalid regex pattern: {}", e)))?;
         self.pattern = Some(regex);
         Ok(self)
+    }
+
+    /// Set number of context lines before/after each match
+    pub fn context_lines(mut self, lines: usize) -> Self {
+        self.context_lines = lines;
+        self
     }
 
     /// Execute the search
@@ -50,49 +60,34 @@ impl RustCrateSearch {
         let resolver = VersionResolver::new();
         let version = resolver.resolve_version(&self.crate_name, self.version_spec.as_deref()).await?;
 
-        // 2. Try to find examples in crate source
+        // 2. Get or extract crate source
         let cache_manager = CacheManager::new()?;
         let extractor = CrateExtractor::new();
         
-        let examples = if let Some(cached_path) = cache_manager.find_cached_crate(&self.crate_name, &version)? {
-            // Extract from cached crate
-            extractor.extract_examples_from_file(&cached_path, self.pattern.as_ref()).await?
+        let checkout_path = cache_manager.get_or_extract_crate(&self.crate_name, &version, &extractor).await?;
+
+        // 3. Search the extracted crate
+        let searcher = CrateSearcher::new();
+        let (example_matches, other_matches) = if let Some(pattern) = &self.pattern {
+            searcher.search_crate(&checkout_path, pattern, self.context_lines)?
         } else {
-            // Download and extract
-            extractor.extract_examples_from_download(&self.crate_name, &version, self.pattern.as_ref()).await?
+            // No pattern - just return empty matches but still provide checkout_path
+            (Vec::new(), Vec::new())
         };
 
-        // 3. If no examples found, try GitHub fallback
-        let final_examples = if examples.is_empty() {
+        // 4. If no examples found, try GitHub fallback
+        let final_example_matches = if example_matches.is_empty() && self.pattern.is_some() {
             let github = GitHubFallback::new();
             github.search_examples(&self.crate_name, &version, self.pattern.as_ref()).await?
         } else {
-            examples
-        };
-
-        // 4. Build result
-        let total_examples = final_examples.len();
-        let matched_examples = if self.pattern.is_some() {
-            final_examples.iter().filter(|e| !e.search_matches().is_empty()).count()
-        } else {
-            total_examples
+            example_matches
         };
 
         Ok(SearchResult {
             version,
-            total_examples,
-            matched_examples,
-            examples: final_examples,
+            checkout_path,
+            example_matches: final_example_matches,
+            other_matches,
         })
-    }
-}
-
-impl Example {
-    /// Get search matches for this example
-    pub fn search_matches(&self) -> &[SearchRange] {
-        match self {
-            Example::ExampleOnDisk { search_matches, .. } => search_matches,
-            Example::ExampleInMemory { search_matches, .. } => search_matches,
-        }
     }
 }

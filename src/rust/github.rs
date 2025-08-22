@@ -1,9 +1,10 @@
 //! GitHub repository fallback for finding examples
 
-use crate::{Result, EgError, Example, SearchRange};
+use crate::{Result, EgError, Match};
 use base64::{Engine as _, engine::general_purpose};
 use regex::Regex;
 use std::env;
+use std::path::PathBuf;
 
 /// Handles GitHub repository fallback when crate sources lack examples
 pub struct GitHubFallback;
@@ -19,7 +20,13 @@ impl GitHubFallback {
         crate_name: &str,
         _version: &str,
         pattern: Option<&Regex>,
-    ) -> Result<Vec<Example>> {
+    ) -> Result<Vec<Match>> {
+        // Only search if we have a pattern
+        let pattern = match pattern {
+            Some(p) => p,
+            None => return Ok(Vec::new()),
+        };
+
         // Get repository URL from crate metadata
         let repo_url = self.get_repository_url(crate_name).await?;
         
@@ -56,11 +63,6 @@ impl GitHubFallback {
 
     /// Parse GitHub URL to extract owner and repository name
     fn parse_github_url(&self, url: &str) -> Result<(String, String)> {
-        // Handle various GitHub URL formats:
-        // https://github.com/owner/repo
-        // https://github.com/owner/repo.git
-        // git://github.com/owner/repo.git
-        
         let url = url.trim_end_matches(".git");
         let parts: Vec<&str> = url.split('/').collect();
         
@@ -78,8 +80,8 @@ impl GitHubFallback {
         &self,
         owner: &str,
         repo: &str,
-        pattern: Option<&Regex>,
-    ) -> Result<Vec<Example>> {
+        pattern: &Regex,
+    ) -> Result<Vec<Match>> {
         // Try to get GitHub token from environment
         let token = env::var("GITHUB_TOKEN").ok();
         
@@ -88,7 +90,6 @@ impl GitHubFallback {
                 .personal_token(token)
                 .build()?
         } else {
-            // Use without authentication (lower rate limits)
             octocrab::Octocrab::default()
         };
 
@@ -102,7 +103,7 @@ impl GitHubFallback {
 
         match contents {
             Ok(content_items) => {
-                let mut examples = Vec::new();
+                let mut matches = Vec::new();
                 
                 for item in content_items.items {
                     // Check if this is a file (not a directory or symlink)
@@ -114,22 +115,20 @@ impl GitHubFallback {
                             
                             let content = String::from_utf8(decoded_bytes)?;
 
-                            let search_matches = if let Some(regex) = pattern {
-                                self.find_matches(&content, regex)
-                            } else {
-                                Vec::new()
-                            };
-
-                            examples.push(Example::ExampleInMemory {
-                                filename: item.name.clone(),
-                                contents: content,
-                                search_matches,
-                            });
+                            // Search for matches in this file
+                            let file_matches = self.find_matches_in_content(
+                                &PathBuf::from(format!("examples/{}", item.name)),
+                                &content,
+                                pattern,
+                                2, // Default context lines
+                            );
+                            
+                            matches.extend(file_matches);
                         }
                     }
                 }
                 
-                Ok(examples)
+                Ok(matches)
             }
             Err(_) => {
                 // Examples directory not found or other error
@@ -138,46 +137,45 @@ impl GitHubFallback {
         }
     }
 
-    /// Find regex matches in content (same logic as extraction.rs)
-    fn find_matches(&self, content: &str, regex: &Regex) -> Vec<SearchRange> {
+    /// Find regex matches in content and return Match objects
+    fn find_matches_in_content(
+        &self,
+        file_path: &PathBuf,
+        content: &str,
+        pattern: &Regex,
+        context_lines: usize,
+    ) -> Vec<Match> {
+        let lines: Vec<&str> = content.lines().collect();
         let mut matches = Vec::new();
-        
-        for mat in regex.find_iter(content) {
-            let start_pos = mat.start();
-            let end_pos = mat.end();
-            
-            let (start_line, start_col) = self.byte_to_line_col(content, start_pos);
-            let (end_line, end_col) = self.byte_to_line_col(content, end_pos);
-            
-            matches.push(SearchRange {
-                byte_start: start_pos as u32,
-                line_start: start_line,
-                column_start: start_col,
-                byte_end: end_pos as u32,
-                line_end: end_line,
-                column_end: end_col,
-            });
-        }
-        
-        matches
-    }
 
-    fn byte_to_line_col(&self, content: &str, byte_pos: usize) -> (u32, u32) {
-        let mut line = 1;
-        let mut col = 1;
-        
-        for (i, ch) in content.char_indices() {
-            if i >= byte_pos {
-                break;
-            }
-            if ch == '\n' {
-                line += 1;
-                col = 1;
-            } else {
-                col += 1;
+        for (line_idx, line) in lines.iter().enumerate() {
+            if pattern.is_match(line) {
+                let line_number = (line_idx + 1) as u32; // 1-based line numbers
+                
+                // Get context lines
+                let context_start = line_idx.saturating_sub(context_lines);
+                let context_end = std::cmp::min(line_idx + context_lines + 1, lines.len());
+                
+                let context_before = lines[context_start..line_idx]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                
+                let context_after = lines[line_idx + 1..context_end]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+
+                matches.push(Match {
+                    file_path: file_path.clone(),
+                    line_number,
+                    line_content: line.to_string(),
+                    context_before,
+                    context_after,
+                });
             }
         }
-        
-        (line, col)
+
+        matches
     }
 }

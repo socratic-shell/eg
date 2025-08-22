@@ -35,17 +35,18 @@ async fn test_current_project_dependency() {
 }
 
 /// Test searching a crate that's NOT in our current project
-/// Should use cargo cache if available, or download to our cache
+/// Uses an obscure old version unlikely to be in cargo cache
 #[tokio::test(flavor = "current_thread")]
 async fn test_external_crate() {
-    // Use 'uuid' - a well-known crate that's not in our dependencies
-    let result = Eg::rust_crate("uuid")
+    // Use ascii-canvas v0.0.1 - very old, obscure version unlikely to be cached
+    let result = Eg::rust_crate("ascii-canvas")
+        .version("=0.0.1")
         .search()
         .await
-        .expect("Should find uuid crate");
+        .expect("Should find ascii-canvas crate");
 
     // Verify we got a result
-    assert!(!result.version.is_empty(), "Should have a version");
+    assert_eq!(result.version, "0.0.1", "Should get exact version requested");
     assert!(result.checkout_path.exists(), "Checkout path should exist");
     
     // Should be either in cargo's src cache OR our extraction cache
@@ -60,9 +61,9 @@ async fn test_external_crate() {
     );
 
     if is_from_cargo_src {
-        println!("✅ uuid v{} found in cargo cache: {}", result.version, result.checkout_path.display());
+        println!("✅ ascii-canvas v{} found in cargo cache: {}", result.version, result.checkout_path.display());
     } else {
-        println!("✅ uuid v{} downloaded to our cache: {}", result.version, result.checkout_path.display());
+        println!("✅ ascii-canvas v{} downloaded to our cache: {}", result.version, result.checkout_path.display());
     }
     
     // Verify the checkout contains expected Rust project structure
@@ -137,13 +138,15 @@ async fn test_nonexistent_crate() {
 /// Test that checkout paths are reused (caching works)
 #[tokio::test(flavor = "current_thread")]
 async fn test_caching() {
-    // Search the same crate twice
-    let result1 = Eg::rust_crate("uuid")
+    // Search the same obscure crate twice
+    let result1 = Eg::rust_crate("ascii-canvas")
+        .version("=0.0.1")
         .search()
         .await
         .expect("First search should succeed");
 
-    let result2 = Eg::rust_crate("uuid")
+    let result2 = Eg::rust_crate("ascii-canvas")
+        .version("=0.0.1")
         .search()
         .await
         .expect("Second search should succeed");

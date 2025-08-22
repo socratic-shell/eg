@@ -44,12 +44,12 @@ impl GitHubFallback {
 
     /// Get repository URL from crates.io metadata
     async fn get_repository_url(&self, crate_name: &str) -> Result<String> {
-        let client = crates_io_api::SyncClient::new(
+        let client = crates_io_api::AsyncClient::new(
             "eg-library (https://github.com/socratic-shell/eg)",
             std::time::Duration::from_millis(1000),
         ).map_err(|e| EgError::Other(e.to_string()))?;
 
-        let crate_info = client.get_crate(crate_name)
+        let crate_info = client.get_crate(crate_name).await
             .map_err(|_| EgError::CrateNotFound(crate_name.to_string()))?;
 
         crate_info.crate_data.repository

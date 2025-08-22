@@ -35,7 +35,7 @@ async fn test_current_project_dependency() {
 }
 
 /// Test searching a crate that's NOT in our current project
-/// Should download from crates.io and extract to our cache
+/// Should use cargo cache if available, or download to our cache
 #[tokio::test(flavor = "current_thread")]
 async fn test_external_crate() {
     // Use 'uuid' - a well-known crate that's not in our dependencies
@@ -48,14 +48,22 @@ async fn test_external_crate() {
     assert!(!result.version.is_empty(), "Should have a version");
     assert!(result.checkout_path.exists(), "Checkout path should exist");
     
-    // Should be in our extraction cache (not cargo's src cache since we don't depend on it)
+    // Should be either in cargo's src cache OR our extraction cache
+    let cargo_home = home::cargo_home().expect("Should find cargo home");
+    let is_from_cargo_src = result.checkout_path.starts_with(cargo_home.join("registry/src"));
+    let is_from_our_cache = result.checkout_path.to_string_lossy().contains("eg/extractions");
+    
     assert!(
-        result.checkout_path.to_string_lossy().contains("eg/extractions"),
-        "Should be in our extraction cache, got: {}",
+        is_from_cargo_src || is_from_our_cache,
+        "Should be in cargo cache or our extraction cache, got: {}",
         result.checkout_path.display()
     );
 
-    println!("✅ uuid v{} downloaded to: {}", result.version, result.checkout_path.display());
+    if is_from_cargo_src {
+        println!("✅ uuid v{} found in cargo cache: {}", result.version, result.checkout_path.display());
+    } else {
+        println!("✅ uuid v{} downloaded to our cache: {}", result.version, result.checkout_path.display());
+    }
     
     // Verify the checkout contains expected Rust project structure
     assert!(result.checkout_path.join("Cargo.toml").exists(), "Should have Cargo.toml");

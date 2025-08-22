@@ -4,7 +4,7 @@ use crate::{Result, EgError, Example, SearchRange};
 use flate2::read::GzDecoder;
 use regex::Regex;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tar::Archive;
 
 /// Handles extraction of examples from .crate files
@@ -39,7 +39,7 @@ impl CrateExtractor {
 
         let response = reqwest::get(&download_url).await?;
         if !response.status().is_success() {
-            return Err(EgError::DownloadError(format!(
+            return Err(EgError::Other(format!(
                 "Failed to download crate: HTTP {}",
                 response.status()
             )));
@@ -70,6 +70,12 @@ impl CrateExtractor {
 
             // Check if this is an example file
             if self.is_example_file(&path) {
+                // Extract filename before reading content to avoid borrow issues
+                let filename = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
                 let mut content = String::new();
                 entry.read_to_string(&mut content)
                     .map_err(|e| EgError::ExtractionError(format!("Failed to read file content: {}", e)))?;
@@ -79,12 +85,6 @@ impl CrateExtractor {
                 } else {
                     Vec::new()
                 };
-
-                // Extract just the filename from the full path
-                let filename = path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
 
                 examples.push(Example::ExampleInMemory {
                     filename,

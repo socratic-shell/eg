@@ -32,6 +32,24 @@ pub enum EgError {
     /// I/O error
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
+    /// Crate not found
+    #[error("Crate '{0}' not found")]
+    CrateNotFound(String),
+    /// No matching versions found
+    #[error("No versions of '{crate_name}' match constraint '{constraint}'")]
+    NoMatchingVersions { crate_name: String, constraint: String },
+    /// No repository URL found
+    #[error("No repository URL found for crate '{0}'")]
+    NoRepositoryUrl(String),
+    /// Invalid GitHub URL format
+    #[error("Invalid GitHub URL format: {0}")]
+    InvalidGitHubUrl(String),
+    /// Base64 decode error
+    #[error("Failed to decode base64 content: {0}")]
+    Base64Error(#[from] base64::DecodeError),
+    /// UTF-8 conversion error
+    #[error("Invalid UTF-8 content: {0}")]
+    Utf8Error(#[from] std::string::FromUtf8Error),
     /// Other error
     #[error("Error: {0}")]
     Other(String),

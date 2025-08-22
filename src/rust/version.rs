@@ -3,7 +3,6 @@
 use crate::{Result, EgError};
 use cargo_metadata::{MetadataCommand, CargoOpt};
 use semver::{Version, VersionReq};
-use std::env;
 
 /// Handles version resolution using the three-tier strategy
 pub struct VersionResolver;
@@ -37,15 +36,12 @@ impl VersionResolver {
 
         // Look through all packages in the resolved dependency graph
         for package in metadata.packages {
-            if package.name == crate_name {
+            if package.name.as_str() == crate_name {
                 return Ok(package.version.to_string());
             }
         }
 
-        Err(EgError::ProjectError(format!(
-            "Crate '{}' not found in current project dependencies", 
-            crate_name
-        )))
+        Err(EgError::CrateNotFound(crate_name.to_string()))
     }
 
     /// Resolve version constraint to latest matching version
@@ -64,10 +60,10 @@ impl VersionResolver {
         matching_versions
             .last()
             .map(|v| v.to_string())
-            .ok_or_else(|| EgError::VersionError(format!(
-                "No versions of '{}' match constraint '{}'", 
-                crate_name, constraint
-            )))
+            .ok_or_else(|| EgError::NoMatchingVersions {
+                crate_name: crate_name.to_string(),
+                constraint: constraint.to_string(),
+            })
     }
 
     /// Get latest version from crates.io
@@ -78,7 +74,7 @@ impl VersionResolver {
         ).map_err(|e| EgError::Other(e.to_string()))?;
 
         let crate_info = client.get_crate(crate_name)
-            .map_err(|e| EgError::DownloadError(format!("Failed to get crate info: {}", e)))?;
+            .map_err(|_| EgError::CrateNotFound(crate_name.to_string()))?;
 
         Ok(crate_info.crate_data.max_version)
     }
@@ -90,11 +86,12 @@ impl VersionResolver {
             std::time::Duration::from_millis(1000),
         ).map_err(|e| EgError::Other(e.to_string()))?;
 
-        let versions = client.crate_versions(crate_name)
-            .map_err(|e| EgError::DownloadError(format!("Failed to get versions: {}", e)))?;
+        // Get crate info which includes versions
+        let crate_info = client.get_crate(crate_name)
+            .map_err(|_| EgError::CrateNotFound(crate_name.to_string()))?;
 
         let mut parsed_versions = Vec::new();
-        for version in versions.versions {
+        for version in crate_info.versions {
             if let Ok(v) = Version::parse(&version.num) {
                 parsed_versions.push(v);
             }

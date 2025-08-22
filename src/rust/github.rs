@@ -1,6 +1,7 @@
 //! GitHub repository fallback for finding examples
 
 use crate::{Result, EgError, Example, SearchRange};
+use base64::{Engine as _, engine::general_purpose};
 use regex::Regex;
 use std::env;
 
@@ -16,7 +17,7 @@ impl GitHubFallback {
     pub async fn search_examples(
         &self,
         crate_name: &str,
-        version: &str,
+        _version: &str,
         pattern: Option<&Regex>,
     ) -> Result<Vec<Example>> {
         // Get repository URL from crate metadata
@@ -42,10 +43,10 @@ impl GitHubFallback {
         ).map_err(|e| EgError::Other(e.to_string()))?;
 
         let crate_info = client.get_crate(crate_name)
-            .map_err(|e| EgError::DownloadError(format!("Failed to get crate info: {}", e)))?;
+            .map_err(|_| EgError::CrateNotFound(crate_name.to_string()))?;
 
         crate_info.crate_data.repository
-            .ok_or_else(|| EgError::GitHubError(format!("No repository URL found for crate '{}'", crate_name)))
+            .ok_or_else(|| EgError::NoRepositoryUrl(crate_name.to_string()))
     }
 
     /// Check if URL is a GitHub repository
@@ -68,7 +69,7 @@ impl GitHubFallback {
             let repo = parts[parts.len() - 1].to_string();
             Ok((owner, repo))
         } else {
-            Err(EgError::GitHubError(format!("Invalid GitHub URL format: {}", url)))
+            Err(EgError::InvalidGitHubUrl(url.to_string()))
         }
     }
 
@@ -104,28 +105,26 @@ impl GitHubFallback {
                 let mut examples = Vec::new();
                 
                 for item in content_items.items {
-                    if let octocrab::models::repos::Content::File(file) = item {
-                        if file.name.ends_with(".rs") {
-                            if let Some(encoded_content) = file.content {
-                                // Decode base64 content
-                                let decoded_bytes = base64::decode(encoded_content.replace('\n', ""))
-                                    .map_err(|e| EgError::GitHubError(format!("Failed to decode file content: {}", e)))?;
-                                
-                                let content = String::from_utf8(decoded_bytes)
-                                    .map_err(|e| EgError::GitHubError(format!("Invalid UTF-8 in file: {}", e)))?;
+                    // Check if this is a file (not a directory or symlink)
+                    if item.r#type == "file" && item.name.ends_with(".rs") {
+                        if let Some(encoded_content) = &item.content {
+                            // Decode base64 content
+                            let decoded_bytes = general_purpose::STANDARD
+                                .decode(encoded_content.replace('\n', ""))?;
+                            
+                            let content = String::from_utf8(decoded_bytes)?;
 
-                                let search_matches = if let Some(regex) = pattern {
-                                    self.find_matches(&content, regex)
-                                } else {
-                                    Vec::new()
-                                };
+                            let search_matches = if let Some(regex) = pattern {
+                                self.find_matches(&content, regex)
+                            } else {
+                                Vec::new()
+                            };
 
-                                examples.push(Example::ExampleInMemory {
-                                    filename: file.name,
-                                    contents: content,
-                                    search_matches,
-                                });
-                            }
+                            examples.push(Example::ExampleInMemory {
+                                filename: item.name.clone(),
+                                contents: content,
+                                search_matches,
+                            });
                         }
                     }
                 }

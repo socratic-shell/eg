@@ -19,7 +19,6 @@
 //! }
 //! ```
 
-use std::ops::Range;
 use std::path::PathBuf;
 
 pub mod rust;

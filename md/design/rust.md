@@ -10,6 +10,7 @@
 - `reqwest`: Download .crate files from crates.io
 - `crates_io_api`: Query crates.io for available versions and repository metadata
 - `octocrab`: GitHub API client for repository fallback
+- `grep` or `ripgrep`: Fast text searching through extracted files
 
 ## Version Resolution Implementation
 
@@ -23,39 +24,45 @@
 - Construct paths like `cache/github.com-1ecc6299db9ec823/{crate}-{version}.crate`
 - Check file existence before attempting download
 
-## Streaming Implementation
+## Extraction and Search Pipeline
 
-Pipeline: HTTP response → `GzDecoder` → `tar::Archive` → filter entries → extract matching files
-
-Download URL format: `https://static.crates.io/crates/{crate_name}/{crate_name}-{version}.crate`
+**New simplified approach**: Extract full crate to local cache, then search everything
 
 ```rust
 // Conceptual flow
-let download_url = format!("https://static.crates.io/crates/{}/{}-{}.crate", 
-                          crate_name, crate_name, version);
-let response = reqwest::get(download_url).await?;
-let gz_decoder = GzDecoder::new(response);
-let mut archive = Archive::new(gz_decoder);
+1. Check if crate is already extracted in our cache
+2. If not, download .crate file and extract to cache directory
+3. Use grep/ripgrep to search all files for pattern
+4. Categorize results: examples/ vs other files
+5. Return paths and context, not file contents
+```
 
-for entry in archive.entries()? {
-    let path = entry.path()?;
-    if path.starts_with("examples/") {
-        // Process this file - it's a gzipped tar archive
-    }
-}
+## Local Cache Structure
+
+```
+~/.cache/eg/  (or platform equivalent)
+├── extractions/
+│   ├── serde-1.0.197/     # Full crate extraction
+│   │   ├── src/
+│   │   ├── examples/
+│   │   └── ...
+│   └── tokio-1.35.0/
+└── metadata/
+    └── extraction_info.json  # Track what's cached
 ```
 
 ## Source Location Pipeline
 
-1. **Check local cache**: Look in cargo's cache (`~/.cargo/registry/cache/`) first
-2. **Download if needed**: Fetch `.crate` file from crates.io
-3. **Stream extraction**: Process gzipped tar archive in memory without filesystem extraction
-4. **Filter examples**: Extract only files from `examples/` directories
-5. **GitHub fallback**: If no examples directory found, extract repository URL from crate metadata and search GitHub
+1. **Check local extraction cache**: Look for already-extracted crate
+2. **Check cargo cache**: Look in cargo's cache (`~/.cargo/registry/cache/`) for .crate file
+3. **Download if needed**: Fetch `.crate` file from crates.io
+4. **Extract to cache**: Decompress and extract full crate to our cache directory
+5. **Search with grep**: Use fast text search across all files
+6. **GitHub fallback**: If no examples found, search GitHub repository
 
 ## GitHub Repository Fallback
 
-When no `examples/` directory is found in the crate source:
+When no examples are found in the extracted crate:
 - Extract repository URL from crate metadata (via `crates_io_api`)
 - Parse repository URL to detect if it's GitHub (github.com)
 - For GitHub repositories: use GitHub API to search for examples
@@ -64,8 +71,10 @@ When no `examples/` directory is found in the crate source:
 
 *Future: Support for GitLab, Codeberg, and other Git hosting platforms*
 
-## Search Scope
+## Search Implementation
 
-Initially focused on files in `examples/` directories. Future extensions will include:
-- Doc comments throughout the crate
-- GitHub repository fallback when crate sources lack examples
+- Use `ripgrep` or similar for fast text search
+- Search all `.rs` files in the extraction
+- Categorize results by directory (examples/ vs src/ vs tests/ etc.)
+- Include configurable context lines around matches
+- Return file paths relative to extraction root

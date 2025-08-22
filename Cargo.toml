@@ -22,13 +22,9 @@ tar = "0.4"
 # HTTP and API clients
 reqwest = { version = "0.12", features = ["json"] }
 crates_io_api = "0.11.0"
-octocrab = "0.44"
 
 # Regex for pattern matching
 regex = "1.0"
-
-# Base64 decoding for GitHub content
-base64 = "0.22"
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

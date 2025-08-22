@@ -7,13 +7,11 @@ mod version;
 mod cache;
 mod extraction;
 mod search;
-mod github;
 
 pub use version::VersionResolver;
 pub use cache::CacheManager;
 pub use extraction::CrateExtractor;
 pub use search::CrateSearcher;
-pub use github::GitHubFallback;
 
 /// Builder for searching Rust crate examples
 pub struct RustCrateSearch {
@@ -75,18 +73,10 @@ impl RustCrateSearch {
             (Vec::new(), Vec::new())
         };
 
-        // 4. If no examples found, try GitHub fallback
-        let final_example_matches = if example_matches.is_empty() && self.pattern.is_some() {
-            let github = GitHubFallback::new();
-            github.search_examples(&self.crate_name, &version, self.pattern.as_ref()).await?
-        } else {
-            example_matches
-        };
-
         Ok(SearchResult {
             version,
             checkout_path,
-            example_matches: final_example_matches,
+            example_matches,
             other_matches,
         })
     }

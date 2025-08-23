@@ -1,0 +1,2 @@
+[alias]
+setup = "run --manifest-path setup/Cargo.toml --"

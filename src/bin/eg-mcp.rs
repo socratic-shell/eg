@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
 }
 
 mod eg_mcp {
-    use eg::{Eg, SearchResult};
+    use eg::Eg;
     use rmcp::{
         ErrorData as McpError, RoleServer, ServerHandler,
         handler::server::{router::tool::ToolRouter, tool::Parameters},
@@ -84,7 +84,24 @@ mod eg_mcp {
 
             match search.search().await {
                 Ok(result) => {
-                    let response = format_search_result(&result);
+                    let response = serde_json::to_string_pretty(&json!({
+                        "version": result.version,
+                        "checkout_path": result.checkout_path.to_string_lossy(),
+                        "example_matches": result.example_matches.iter().map(|m| json!({
+                            "file_path": m.file_path.to_string_lossy(),
+                            "line_number": m.line_number,
+                            "line_content": m.line_content,
+                            "context_before": m.context_before,
+                            "context_after": m.context_after
+                        })).collect::<Vec<_>>(),
+                        "other_matches": result.other_matches.iter().map(|m| json!({
+                            "file_path": m.file_path.to_string_lossy(),
+                            "line_number": m.line_number,
+                            "line_content": m.line_content,
+                            "context_before": m.context_before,
+                            "context_after": m.context_after
+                        })).collect::<Vec<_>>()
+                    })).unwrap();
                     Ok(CallToolResult::success(vec![Content::text(response)]))
                 }
                 Err(e) => {
@@ -154,51 +171,5 @@ mod eg_mcp {
         ) -> Result<InitializeResult, McpError> {
             Ok(self.get_info())
         }
-    }
-
-    fn format_search_result(result: &SearchResult) -> String {
-        let mut output = String::new();
-        
-        output.push_str(&format!("# Search Results for {} v{}\n\n", 
-                                result.checkout_path.file_name()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or("unknown"), 
-                                result.version));
-        
-        output.push_str(&format!("**Extracted to:** `{}`\n\n", result.checkout_path.display()));
-        
-        if !result.example_matches.is_empty() {
-            output.push_str(&format!("## Examples ({} matches)\n\n", result.example_matches.len()));
-            for m in &result.example_matches {
-                output.push_str(&format!("### {}\n", m.file_path.display()));
-                output.push_str(&format!("Line {}: `{}`\n\n", m.line_number, m.line_content.trim()));
-                
-                if !m.context_before.is_empty() || !m.context_after.is_empty() {
-                    output.push_str("```rust\n");
-                    for line in &m.context_before {
-                        output.push_str(&format!("{}\n", line));
-                    }
-                    output.push_str(&format!(">>> {}\n", m.line_content));
-                    for line in &m.context_after {
-                        output.push_str(&format!("{}\n", line));
-                    }
-                    output.push_str("```\n\n");
-                }
-            }
-        }
-        
-        if !result.other_matches.is_empty() {
-            output.push_str(&format!("## Other Matches ({} matches)\n\n", result.other_matches.len()));
-            for m in &result.other_matches {
-                output.push_str(&format!("### {}\n", m.file_path.display()));
-                output.push_str(&format!("Line {}: `{}`\n\n", m.line_number, m.line_content.trim()));
-            }
-        }
-        
-        if result.example_matches.is_empty() && result.other_matches.is_empty() {
-            output.push_str("No matches found.\n");
-        }
-        
-        output
     }
 }

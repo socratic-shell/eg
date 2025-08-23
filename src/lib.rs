@@ -38,7 +38,7 @@ impl Eg {
 }
 
 /// Result of an example search
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SearchResult {
     /// The exact version that was searched
     pub version: String,
@@ -51,7 +51,7 @@ pub struct SearchResult {
 }
 
 /// A search match with context
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Match {
     /// Relative path within the crate
     pub file_path: PathBuf,

@@ -84,24 +84,7 @@ mod eg_mcp {
 
             match search.search().await {
                 Ok(result) => {
-                    let response = serde_json::to_string_pretty(&json!({
-                        "version": result.version,
-                        "checkout_path": result.checkout_path.to_string_lossy(),
-                        "example_matches": result.example_matches.iter().map(|m| json!({
-                            "file_path": m.file_path.to_string_lossy(),
-                            "line_number": m.line_number,
-                            "line_content": m.line_content,
-                            "context_before": m.context_before,
-                            "context_after": m.context_after
-                        })).collect::<Vec<_>>(),
-                        "other_matches": result.other_matches.iter().map(|m| json!({
-                            "file_path": m.file_path.to_string_lossy(),
-                            "line_number": m.line_number,
-                            "line_content": m.line_content,
-                            "context_before": m.context_before,
-                            "context_after": m.context_after
-                        })).collect::<Vec<_>>()
-                    })).unwrap();
+                    let response = serde_json::to_string_pretty(&result).unwrap();
                     Ok(CallToolResult::success(vec![Content::text(response)]))
                 }
                 Err(e) => {

@@ -327,7 +327,6 @@ dependencies = [
  "regex",
  "reqwest",
  "rmcp",
- "rmcp-macros",
  "semver",
  "serde",
  "serde_json",

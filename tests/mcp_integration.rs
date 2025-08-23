@@ -1,4 +1,3 @@
-#[cfg(feature = "mcp")]
 mod mcp_tests {
     use std::process::{Command, Stdio};
     use std::io::{Write, BufRead, BufReader};
@@ -7,7 +6,7 @@ mod mcp_tests {
     #[tokio::test]
     async fn test_mcp_server_initialization() {
         let mut child = Command::new("cargo")
-            .args(&["run", "--bin", "eg-mcp", "--features", "mcp"])
+            .args(&["run", "--bin", "eg-mcp"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
